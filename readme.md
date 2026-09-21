@@ -11,10 +11,11 @@
 1. [Обзор архитектуры](#обзор-архитектуры)
 2. [C4-диаграммы](#c4-диаграммы)
 3. [A2A-протокол](#a2a-протокол)
-4. [Быстрый старт](#быстрый-старт)
-5. [Тестирование](#тестирование)
-6. [Дорожная карта](#дорожная-карта)
-7. [Связь с Blueprint](#связь-с-blueprint)
+4. [Workflow Diagrams](#workflow-diagrams)
+5. [Быстрый старт](#быстрый-старт)
+6. [Тестирование](#тестирование)
+7. [Дорожная карта](#дорожная-карта)
+8. [Связь с Blueprint](#связь-с-blueprint)
 
 ---
 
@@ -55,6 +56,7 @@ C4Context
     Rel(bpmn, platform, "Отправка задач", "HTTPS")
     Rel(platform, opa, "Проверка политики", "HTTP")
     Rel(platform, obs, "Трейсы + метрики", "OTLP + HTTP")
+
 ```
 
 ### Уровень 2 — Container
@@ -83,6 +85,7 @@ C4Container
     Rel(orchestrator, yamls, "Загрузка контракта", "Filesystem")
     Rel(sourcing, yamls, "Загрузка контракта", "Filesystem")
     Rel(pricing, yamls, "Загрузка контракта", "Filesystem")
+
 ```
 
 ### Уровень 3 — Component
@@ -110,6 +113,7 @@ C4Component
     Rel(worker_client, pricing_api, "A2A: POST /a2a/task", "HTTP")
     Rel(routes, aggregator, "Агрегация результатов", "Python")
     Rel(routes, contract_loader, "Загрузка контрактов", "PyYAML")
+
 ```
 
 ---
@@ -145,13 +149,14 @@ output_schema:
 security:
   required_svid: "spiffe://company.ru/agents/sourcing_v1"
   audit_level: "full"
+
 ```
 
 ### A2A-вызов
 
 Orchestrator вызывает worker через HTTP с SVID в заголовке:
 
-```
+```http
 POST /a2a/task
 X-Agent-SVID: spiffe://company.ru/agents/orchestrator_v1
 Content-Type: application/json
@@ -160,13 +165,14 @@ Content-Type: application/json
   "task": { "lot_id": "LOT-001", "category": "IT" },
   "caller_svid": "spiffe://company.ru/agents/orchestrator_v1"
 }
+
 ```
 
 ### Многошаговая координация
 
 Orchestrator выполняет **многошаговые задачи**:
 
-```
+```text
 task_type=procurement
     ├─ Шаг 1: Sourcing Agent
     │    └─ Если nomenclature_ok = true
@@ -176,6 +182,98 @@ task_type=procurement
     ↓
 Агрегация: avg confidence = (0.92 + 0.88) / 2 = 0.90
 Решение: approve (>= 0.85)
+
+```
+
+---
+
+## Workflow Diagrams
+
+### A2A Sequence — Multi-Step Task
+
+Полный путь задачи `procurement` через Orchestrator и worker-агентов.
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Client
+    participant Orchestrator
+    participant Sourcing as Sourcing Agent
+    participant Pricing as Pricing Agent
+
+    Client->>Orchestrator: POST /a2a/task - procurement task
+    Note over Orchestrator: Parse task and determine workers
+
+    Orchestrator->>Sourcing: POST /a2a/task + SVID header
+    Note over Sourcing: Verify caller SVID
+    Sourcing-->>Orchestrator: lot_data and nomenclature_ok true
+
+    alt nomenclature_ok is true
+        Orchestrator->>Pricing: POST /a2a/task + SVID header
+        Note over Pricing: Calculate NMC
+        Pricing-->>Orchestrator: nmc_value and confidence
+    else nomenclature_ok is false
+        Orchestrator->>Orchestrator: Skip pricing
+    end
+
+    Note over Orchestrator: Aggregate confidence 0.92 and 0.88 equals 0.90
+    Note over Orchestrator: Decision approve
+
+    Orchestrator-->>Client: decision approve
+
+```
+
+### Decision Flow — Orchestrator Logic
+
+Логика принятия решения в Orchestrator.
+
+```mermaid
+flowchart TD
+    A[Receive task] --> B{task type}
+    
+    B -->|procurement| C[Call Sourcing Agent]
+    B -->|sourcing| D[Call Sourcing Agent]
+    B -->|pricing| E[Call Pricing Agent]
+    B -->|unknown| F[Return 400]
+    
+    C --> G{nomenclature ok}
+    G -->|true| H[Call Pricing Agent]
+    G -->|false| I[Skip pricing]
+    
+    H --> J[Collect results]
+    I --> J
+    
+    J --> K[Compute avg confidence]
+    K --> L{confidence above 0.85}
+    L -->|yes| M[decision approve]
+    L -->|no| N[decision escalate]
+    
+    M --> O[Return response]
+    N --> O
+    
+    style M fill:#d4edda
+    style N fill:#fff3cd
+    style F fill:#f8d7da
+
+```
+
+### Agent Lifecycle — State Diagram
+
+Жизненный цикл worker-агента.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Starting
+    Starting --> Registering
+    Registering --> Ready
+    Ready --> Working
+    Working --> Ready
+    Working --> Escalating
+    Escalating --> Ready
+    Ready --> Shutdown
+    Shutdown --> [*]
+
 ```
 
 ---
@@ -184,22 +282,25 @@ task_type=procurement
 
 ### Требования
 
-- Docker Desktop ≥ 4.89
-- PowerShell (Windows) или Bash (Linux/macOS)
+* Docker Desktop ≥ 4.89
+* PowerShell (Windows) или Bash (Linux/macOS)
 
 ### 1. Запустить платформу
 
 ```powershell
 docker compose up --build -d
 docker compose ps
+
 ```
 
 Ожидаемый вывод:
-```
-NAME              STATUS    PORTS
-aop-orchestrator  Up        0.0.0.0:9000->9000/tcp
-aop-pricing       Up        0.0.0.0:9002->9002/tcp
-aop-sourcing      Up        0.0.0.0:9001->9001/tcp
+
+```text
+NAME            STATUS        PORTS
+aop-orchestrator   Up        0.0.0.0:9000->9000/tcp
+aop-pricing        Up        0.0.0.0:9002->9002/tcp
+aop-sourcing       Up        0.0.0.0:9001->9001/tcp
+
 ```
 
 ### 2. Проверить health
@@ -208,12 +309,14 @@ aop-sourcing      Up        0.0.0.0:9001->9001/tcp
 Invoke-RestMethod -Uri "http://localhost:9000/health"
 Invoke-RestMethod -Uri "http://localhost:9001/health"
 Invoke-RestMethod -Uri "http://localhost:9002/health"
+
 ```
 
 ### 3. Получить контракт агента
 
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:9000/contract" | ConvertTo-Json -Depth 10
+
 ```
 
 ### 4. Запустить мультиагентную задачу
@@ -225,6 +328,7 @@ Invoke-RestMethod -Uri "http://localhost:9000/a2a/task" `
     -Method Post `
     -ContentType "application/json" `
     -Body $json | ConvertTo-Json -Depth 10
+
 ```
 
 ---
@@ -261,6 +365,7 @@ Invoke-RestMethod -Uri "http://localhost:9000/a2a/task" `
     }
   ]
 }
+
 ```
 
 ### Проверить логи
@@ -269,14 +374,24 @@ Invoke-RestMethod -Uri "http://localhost:9000/a2a/task" `
 docker logs aop-orchestrator --tail 30
 docker logs aop-sourcing --tail 20
 docker logs aop-pricing --tail 20
+
 ```
+
+---
+
+## Дорожная карта
+
+* [x] Реализация A2A-вызовов и передачи SVID
+* [x] Иерархическая координация (Orchestrator -> Sourcing -> Pricing)
+* [ ] Подключение OPA (Policy Engine)
+* [ ] Реализация Immutable Audit Trail
 
 ---
 
 ## Связь с Blueprint
 
 | Раздел blueprint | Реализация |
-|------------------|-----------|
+| --- | --- |
 | **3.1 Иерархическая оркестрация** | Orchestrator + Worker-агенты |
 | **3.2.1 Контракты агентов** | YAML-контракты в `contracts/` |
 | **3.2.2 Шина сообщений** | A2A на HTTP (в production: RabbitMQ) |
@@ -287,6 +402,6 @@ docker logs aop-pricing --tail 20
 
 ## Ссылки
 
-- **Blueprint:** [github.com/realrvs/enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint)
-- **Reference PoC (BPMN + LLM + Policy):** [github.com/realrvs/agentic-orchestration-poc](https://github.com/realrvs/agentic-orchestration-poc)
-- **MCP Gateway PoC:** [github.com/realrvs/mcp-gateway-poc](https://github.com/realrvs/mcp-gateway-poc)
+* **Blueprint:** [github.com/realrvs/enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint?utm_source=gemini)
+* **Reference PoC (BPMN + LLM + Policy):** [github.com/realrvs/agentic-orchestration-poc](https://github.com/realrvs/agentic-orchestration-poc?utm_source=gemini)
+* **MCP Gateway PoC:** [github.com/realrvs/mcp-gateway-poc](https://github.com/realrvs/mcp-gateway-poc?utm_source=gemini)
