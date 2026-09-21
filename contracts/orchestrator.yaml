@@ -1,0 +1,37 @@
+agent_id: "orchestrator_agent_v1"
+name: "Orchestrator Agent"
+version: "1.0"
+description: |
+  Координирует worker-агентов для обработки закупочных заявок.
+capabilities:
+  - route_task
+  - aggregate_results
+  - escalate_to_human
+input_schema:
+  type: object
+  properties:
+    task_type:
+      type: string
+      enum: ["sourcing", "pricing", "compliance", "document", "evaluation"]
+    payload:
+      type: object
+    context:
+      type: object
+output_schema:
+  type: object
+  properties:
+    decision:
+      type: string
+      enum: ["approve", "reject", "escalate"]
+    confidence:
+      type: number
+    reasoning:
+      type: string
+    worker_results:
+      type: array
+sla:
+  max_execution_time: "60s"
+  retry_policy: "3 attempts"
+security:
+  required_svid: "spiffe://company.ru/agents/orchestrator_v1"
+  audit_level: "full"

@@ -1,0 +1,31 @@
+agent_id: "pricing_agent_v1"
+name: "Pricing Agent"
+version: "1.0"
+description: |
+  Рассчитывает НМЦ, проверяет КЦД.
+capabilities:
+  - calculate_nmc
+input_schema:
+  type: object
+  properties:
+    lot_id:
+      type: string
+    methodology:
+      type: string
+    amount:
+      type: number
+output_schema:
+  type: object
+  properties:
+    nmc_value:
+      type: number
+    justification:
+      type: string
+    confidence:
+      type: number
+sla:
+  max_execution_time: "30s"
+  retry_policy: "3 attempts"
+security:
+  required_svid: "spiffe://company.ru/agents/pricing_v1"
+  audit_level: "full"

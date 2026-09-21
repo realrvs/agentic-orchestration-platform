@@ -1,0 +1,32 @@
+agent_id: "sourcing_agent_v1"
+name: "Sourcing Agent"
+version: "1.0"
+description: |
+  Собирает и агрегирует потребности из производственных систем.
+capabilities:
+  - collect_requirements
+  - aggregate_needs
+input_schema:
+  type: object
+  properties:
+    lot_id:
+      type: string
+    category:
+      type: string
+    region:
+      type: string
+output_schema:
+  type: object
+  properties:
+    lot_data:
+      type: object
+    nomenclature_ok:
+      type: boolean
+    confidence:
+      type: number
+sla:
+  max_execution_time: "30s"
+  retry_policy: "3 attempts"
+security:
+  required_svid: "spiffe://company.ru/agents/sourcing_v1"
+  audit_level: "full"

@@ -1,0 +1,40 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: agents/orchestrator/Dockerfile
+    container_name: aop-orchestrator
+    ports:
+      - "9000:9000"
+    environment:
+      SOURCING_AGENT_URL: http://sourcing:9001
+      PRICING_AGENT_URL: http://pricing:9002
+    depends_on:
+      - sourcing
+      - pricing
+    networks:
+      - aop-network
+
+  sourcing:
+    build:
+      context: .
+      dockerfile: agents/workers/Dockerfile.sourcing
+    container_name: aop-sourcing
+    ports:
+      - "9001:9001"
+    networks:
+      - aop-network
+
+  pricing:
+    build:
+      context: .
+      dockerfile: agents/workers/Dockerfile.pricing
+    container_name: aop-pricing
+    ports:
+      - "9002:9002"
+    networks:
+      - aop-network
+
+networks:
+  aop-network:
+    driver: bridge
