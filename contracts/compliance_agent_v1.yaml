@@ -1,0 +1,38 @@
+﻿agent_id: "compliance_agent_v1"
+name: "Compliance Agent"
+version: "1.0"
+description: "Проверка соответствия закупки 223-ФЗ и локальным нормативным актам заказчика"
+
+capabilities:
+  - check_223fz
+  - check_local_acts
+  - verify_supplier
+  - calculate_compliance_confidence
+
+input_schema:
+  type: object
+  required: [lot_id, amount, region]
+  properties:
+    lot_id:      { type: string }
+    amount:      { type: number }
+    region:      { type: string }
+    supplier_id: { type: string }
+    category:    { type: string }
+    nmc_value:   { type: number }
+
+output_schema:
+  type: object
+  properties:
+    compliance_ok:  { type: boolean }
+    reasoning:      { type: string }
+    confidence:     { type: number }
+    matched_rules:  { type: array, items: { type: string } }
+    violations:     { type: array, items: { type: string } }
+
+security:
+  required_svid: "spiffe://company.ru/agents/compliance_v1"
+  audit_level: "full"
+
+runtime:
+  llm_mode: "${LLM_MODE}"
+  vector_store: "${VECTOR_STORE}"
