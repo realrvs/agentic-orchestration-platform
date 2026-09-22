@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "Procurement policy for 223-FZ PoC"
+  },
+  "limits": {
+    "max_amount": 50000000,
+    "min_confidence": 0.85
+  },
+  "regions": {
+    "allow": ["Moscow", "Saint-Petersburg", "Novosibirsk"],
+    "restricted": ["Moscow Restricted Zone"]
+  }
+}

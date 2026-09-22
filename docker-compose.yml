@@ -1,4 +1,15 @@
 services:
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: aop-opa
+    command: run --server --log-level info --addr 0.0.0.0:8181 /policies
+    volumes:
+      - ./policies:/policies:ro
+    ports:
+      - "9210:8181"
+    networks:
+      - aop-network
+
   orchestrator:
     build:
       context: .
@@ -9,9 +20,13 @@ services:
     environment:
       SOURCING_AGENT_URL: http://sourcing:9001
       PRICING_AGENT_URL: http://pricing:9002
+      COMPLIANCE_AGENT_URL: http://compliance:9003
+      OPA_URL: http://opa:8181
     depends_on:
       - sourcing
       - pricing
+      - compliance
+      - opa
     networks:
       - aop-network
 
@@ -22,6 +37,11 @@ services:
     container_name: aop-sourcing
     ports:
       - "9001:9001"
+    environment:
+      MOCK_1C_URL: http://mock-1c:9101
+      MCP_TIMEOUT: "5.0"
+    depends_on:
+      - mock-1c
     networks:
       - aop-network
 
@@ -32,6 +52,48 @@ services:
     container_name: aop-pricing
     ports:
       - "9002:9002"
+    environment:
+      MOCK_MARKET_URL: http://mock-market:9102
+      MCP_TIMEOUT: "5.0"
+    depends_on:
+      - mock-market
+    networks:
+      - aop-network
+
+  compliance:
+    build:
+      context: .
+      dockerfile: agents/compliance/Dockerfile
+    image: compliance-agent:v1
+    container_name: aop-compliance
+    ports:
+      - "9003:9003"
+    environment:
+      LLM_MODE: "stub"
+      VECTOR_STORE: "memory"
+      OLLAMA_URL: "http://ollama:11434"
+    networks:
+      - aop-network
+
+  mock-1c:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile.mock-1c
+    image: mock-1c:v1
+    container_name: aop-mock-1c
+    ports:
+      - "9101:9101"
+    networks:
+      - aop-network
+
+  mock-market:
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile.mock-market
+    image: mock-market:v1
+    container_name: aop-mock-market
+    ports:
+      - "9102:9102"
     networks:
       - aop-network
 
