@@ -27,6 +27,10 @@ WORKERS = {
         "url": os.getenv("COMPLIANCE_AGENT_URL", "http://compliance:9003"),
         "svid": "spiffe://company.ru/agents/compliance_v1",
     },
+    "document": {
+        "url": os.getenv("DOCUMENT_AGENT_URL", "http://document:9004"),
+        "svid": "spiffe://company.ru/agents/document_v1",
+    },
 }
 
 class TaskRequest(BaseModel):
@@ -181,6 +185,46 @@ async def handle_task(request: TaskRequest) -> dict[str, Any]:
                 "escalate_reasons": [f"opa call failed: {e}"],
             }
 
+        # ── Шаг 6: Document Agent (только при allow) ──
+        document_result: dict[str, Any] = {}
+        if opa_result.get("decision") == "allow":
+            try:
+                document_result = await call_worker("document", {
+                    "lot_id": request.payload.get("lot_id"),
+                    "amount": request.payload.get("amount", 0),
+                    "nmc_value": pricing_result.get("nmc_value"),
+                    "region": request.payload.get("region", "Moscow"),
+                    "category": request.payload.get("category", "server hardware"),
+                    "supplier_id": request.payload.get("supplier_id"),
+                    "items": sourcing_result.get("lot_data", {}).get("items", []),
+                    "items_count": sourcing_result.get("lot_data", {}).get("items_count", 0),
+                    "market": pricing_result.get("market", {}),
+                    "market_source": pricing_result.get("source", "mock-market"),
+                    "market_sample": pricing_result.get("market", {}).get("sample_size", 0),
+                    "compliance_ok": compliance_result.get("compliance_ok", False),
+                    "compliance_reasoning": compliance_result.get("reasoning", ""),
+                    "matched_rules": compliance_result.get("matched_rules", []),
+                    "opa_decision": opa_result.get("decision"),
+                    "opa_deny_reasons": list(opa_result.get("deny_reasons", [])),
+                    "opa_escalate_reasons": list(opa_result.get("escalate_reasons", [])),
+                    "policy_version": opa_result.get("policy_version", "unknown"),
+                })
+                results.append(WorkerCall(
+                    worker="document",
+                    svid=WORKERS["document"]["svid"],
+                    request=request.payload,
+                    response=document_result,
+                    success=True,
+                ))
+            except Exception as e:
+                results.append(WorkerCall(
+                    worker="document",
+                    svid=WORKERS["document"]["svid"],
+                    request=request.payload,
+                    response={"error": str(e)},
+                    success=False,
+                ))
+
         reasoning_parts = [f"{r.worker}: {'OK' if r.success else 'FAILED'}" for r in results]
         reasoning_parts.append(f"opa: {opa_result.get('decision')}")
 
@@ -189,6 +233,12 @@ async def handle_task(request: TaskRequest) -> dict[str, Any]:
             "confidence": avg_confidence,
             "reasoning": "; ".join(reasoning_parts),
             "opa": opa_result,
+            "document": {
+                "pzd_text": document_result.get("pzd_text"),
+                "contract_draft_text": document_result.get("contract_draft_text"),
+                "generated_at": document_result.get("generated_at"),
+                "documents": document_result.get("documents", []),
+            } if document_result else None,
             "worker_results": [r.model_dump() for r in results],
         }
 

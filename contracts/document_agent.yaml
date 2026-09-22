@@ -1,0 +1,38 @@
+agent_id: "document_agent_v1"
+name: "Document Agent"
+version: "1.0"
+description: "Формирование ПЗД и проекта договора по Jinja2-шаблонам"
+
+capabilities:
+  - generate_pzd
+  - generate_contract_draft
+  - render_documents
+
+input_schema:
+  type: object
+  required: [lot_id, amount, category]
+  properties:
+    lot_id:       { type: string }
+    amount:       { type: number }
+    nmc_value:    { type: number }
+    region:       { type: string }
+    category:     { type: string }
+    supplier_id:  { type: string }
+    items:        { type: array }
+    items_count:  { type: integer }
+    market:       { type: object }
+    compliance_ok: { type: boolean }
+    opa_decision:  { type: string }
+
+output_schema:
+  type: object
+  properties:
+    pzd_text:            { type: string }
+    contract_draft_text: { type: string }
+    confidence:          { type: number }
+    generated_at:        { type: string }
+    documents:           { type: array }
+
+security:
+  required_svid: "spiffe://company.ru/agents/document_v1"
+  audit_level: "full"

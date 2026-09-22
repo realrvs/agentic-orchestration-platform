@@ -21,11 +21,13 @@ services:
       SOURCING_AGENT_URL: http://sourcing:9001
       PRICING_AGENT_URL: http://pricing:9002
       COMPLIANCE_AGENT_URL: http://compliance:9003
+      DOCUMENT_AGENT_URL: http://document:9004
       OPA_URL: http://opa:8181
     depends_on:
       - sourcing
       - pricing
       - compliance
+      - document
       - opa
     networks:
       - aop-network
@@ -75,6 +77,15 @@ services:
     networks:
       - aop-network
 
+  document:
+    build:
+      context: .
+      dockerfile: agents/document/Dockerfile
+    container_name: aop-document
+    ports:
+      - "9004:9004"
+    networks:
+      - aop-network
   mock-1c:
     build:
       context: .

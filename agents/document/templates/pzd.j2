@@ -1,0 +1,76 @@
+# ПОЯСНИТЕЛЬНАЯ ЗАПИСКА К ДОГОВОРУ (ПЗД)
+
+**Номер лота:** {{ lot_id }}
+**Дата формирования:** {{ generated_at }}
+**Регион поставки:** {{ region }}
+**Категория закупки:** {{ category }}
+
+---
+
+## 1. Предмет закупки
+
+Закупка «{{ category }}» на сумму **{{ "{:,.2f}".format(amount) }} руб.**
+
+Номенклатурные позиции ({{ items_count }} шт.):
+
+{% for item in items %}
+- **{{ item.code }}** — {{ item.name }} ({{ item.unit }}), ОКПД2: {{ item.okpd2 }}
+{% endfor %}
+
+---
+
+## 2. Обоснование начальной (максимальной) цены
+
+НМЦ рассчитана методом сопоставимых рыночных цен:
+
+- **НМЦ:** {{ "{:,.2f}".format(nmc_value) }} руб.
+- **Средняя рыночная цена:** {{ "{:,.2f}".format(market_avg) }} руб.
+- **Минимум:** {{ "{:,.2f}".format(market_min) }} руб.
+- **Максимум:** {{ "{:,.2f}".format(market_max) }} руб.
+- **Источник:** {{ market_source }}
+- **Размер выборки:** {{ market_sample }} предложений
+
+---
+
+## 3. Соответствие 223-ФЗ и ЛНА
+
+**Результат compliance-проверки:** {% if compliance_ok %}✅ СООТВЕТСТВУЕТ{% else %}❌ НЕ СООТВЕТСТВУЕТ{% endif %}
+
+**Применённые правила:**
+
+{% for rule in matched_rules %}
+- {{ rule }}
+{% endfor %}
+
+**Обоснование:** {{ compliance_reasoning }}
+
+---
+
+## 4. Решение политики (OPA)
+
+**Decision:** {{ opa_decision }}
+
+{% if opa_deny_reasons %}
+**Deny reasons:**
+{% for r in opa_deny_reasons %}
+- {{ r }}
+{% endfor %}
+{% endif %}
+
+{% if opa_escalate_reasons %}
+**Escalate reasons:**
+{% for r in opa_escalate_reasons %}
+- {{ r }}
+{% endfor %}
+{% endif %}
+
+**Policy version:** {{ policy_version }}
+
+---
+
+## 5. Итоговое решение
+
+На основании проведённого анализа, закупка **{{ opa_decision.upper() }}** к проведению.
+
+**Подготовил:** Document Agent v1.0
+**Уверенность:** {{ "{:.2f}".format(confidence) }}
