@@ -1,0 +1,68 @@
+{
+  "items": [
+    {
+      "code": "ESU-26.20.14.000",
+      "name": "Сервер двухпроцессорный rackmount 2U",
+      "category": "server hardware",
+      "unit": "шт",
+      "okpd2": "26.20.14",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.20.15.000",
+      "name": "Сервер четырёхпроцессорный rackmount 4U",
+      "category": "server hardware",
+      "unit": "шт",
+      "okpd2": "26.20.15",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.20.21.000",
+      "name": "Система хранения данных (СХД) all-flash",
+      "category": "storage",
+      "unit": "шт",
+      "okpd2": "26.20.21",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.30.11.000",
+      "name": "Коммутатор сетевой 48 портов 10GbE",
+      "category": "network equipment",
+      "unit": "шт",
+      "okpd2": "26.30.11",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.30.12.000",
+      "name": "Маршрутизатор корпоративный",
+      "category": "network equipment",
+      "unit": "шт",
+      "okpd2": "26.30.12",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.20.16.000",
+      "name": "Сервер blade-модуль",
+      "category": "server hardware",
+      "unit": "шт",
+      "okpd2": "26.20.16",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-62.01.11.000",
+      "name": "Услуги по разработке ПО",
+      "category": "software services",
+      "unit": "усл",
+      "okpd2": "62.01.11",
+      "nomenclature_ok": true
+    },
+    {
+      "code": "ESU-26.20.17.000",
+      "name": "Сервер с GPU-ускорителями",
+      "category": "server hardware",
+      "unit": "шт",
+      "okpd2": "26.20.17",
+      "nomenclature_ok": true
+    }
+  ]
+}

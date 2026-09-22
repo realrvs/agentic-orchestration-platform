@@ -1,0 +1,42 @@
+{
+  "prices": {
+    "server hardware": {
+      "avg_price": 285000,
+      "min_price": 210000,
+      "max_price": 420000,
+      "source": "mock-market",
+      "method": "comparable_market_prices",
+      "sample_size": 12
+    },
+    "storage": {
+      "avg_price": 1450000,
+      "min_price": 980000,
+      "max_price": 2100000,
+      "source": "mock-market",
+      "method": "comparable_market_prices",
+      "sample_size": 7
+    },
+    "network equipment": {
+      "avg_price": 175000,
+      "min_price": 120000,
+      "max_price": 260000,
+      "source": "mock-market",
+      "method": "comparable_market_prices",
+      "sample_size": 9
+    },
+    "software services": {
+      "avg_price": 950000,
+      "min_price": 600000,
+      "max_price": 1500000,
+      "source": "mock-market",
+      "method": "comparable_market_prices",
+      "sample_size": 5
+    }
+  },
+  "index": {
+    "base": "2024-Q1",
+    "current": "2026-Q3",
+    "value": 1.12,
+    "comment": "Индекс роста цен на ИТ-оборудование"
+  }
+}
