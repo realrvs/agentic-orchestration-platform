@@ -1,279 +1,108 @@
 # Agentic Orchestration Platform
 
-**Мультиагентная платформа оркестрации** с протоколом A2A (Agent-to-Agent), формальными контрактами и WIMSE-совместимой идентичностью.
+**Мультиагентная платформа оркестрации** с протоколом A2A (Agent-to-Agent), формальными контрактами, WIMSE-идентичностью и policy enforcement через OPA/Rego.
 
-Референсная реализация паттернов оркестрации из [enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint) — **раздел 3.1 (Иерархическая оркестрация)** и **раздел 3.2 (A2A-протокол)**.
+Референсная реализация паттернов из [enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint) — разделы **3.1 (Иерархическая оркестрация)**, **3.2 (A2A-протокол)**, **4.1 (Agent Policies)**, **4.2 (WIMSE Identity)**.
 
 ---
 
 ## Содержание
 
-1. [Обзор архитектуры](#обзор-архитектуры)
-2. [C4-диаграммы](#c4-диаграммы)
-3. [A2A-протокол](#a2a-протокол)
-4. [Workflow Diagrams](#workflow-diagrams)
-5. [Быстрый старт](#быстрый-старт)
-6. [Тестирование](#тестирование)
-7. [Дорожная карта](#дорожная-карта)
-8. [Связь с Blueprint](#связь-с-blueprint)
+1. [Что это](#что-это)
+2. [Архитектура](#архитектура)
+3. [Быстрый старт](#быстрый-старт)
+4. [Сервисы](#сервисы)
+5. [Компоненты](#компоненты)
+6. [Безопасность](#безопасность)
+7. [Конфигурация](#конфигурация)
+8. [Verified Scenarios](#verified-scenarios)
+9. [Дорожная карта](#дорожная-карта)
+10. [Структура репозитория](#структура-репозитория)
+11. [Связь с Blueprint](#связь-с-blueprint)
+12. [Ссылки](#ссылки)
 
 ---
 
-## Обзор архитектуры
+## Что это
 
-Ключевые принципы:
-
-- **Orchestrator Agent** — координирует worker-агентов, маршрутизирует задачи, агрегирует результаты
-- **Worker Agents** — каждый отвечает за узкую задачу (сорсинг, ценообразование, комплаенс, ...)
-- **Формальные контракты** — каждый агент публикует YAML-контракт (в стиле OpenAPI/AsyncAPI)
-- **Передача SVID** — каждый A2A-вызов несёт заголовок `X-Agent-SVID` (WIMSE)
-- **Агрегация confidence** — Orchestrator вычисляет средний confidence по всем worker'ам
-- **Эскалация** — если confidence < порога, решение = `escalate` (ручной review)
-
----
-
-## C4-диаграммы
-
-### Уровень 1 — System Context
-
-Кто использует платформу и какие внешние зависимости существуют.
-
-```mermaid
-C4Context
-    title System Context - Agentic Orchestration Platform
-
-    Person(client, "Клиент", "Отправляет задачи на закупку через REST API")
-    Person(operator, "Оператор", "Мониторит состояние платформы")
-
-    System(platform, "Agentic Orchestration Platform", "Мультиагентная координация через A2A-протокол")
-
-    System_Ext(bpmn, "BPMN Engine (Camunda)", "Отправляет задачи в Orchestrator")
-    System_Ext(opa, "OPA (Policy Engine)", "Проверяет A2A-вызовы (RBAC + ABAC)")
-    System_Ext(obs, "Observability Stack", "Jaeger + Langfuse + Prometheus")
-
-    Rel(client, platform, "POST /a2a/task", "HTTPS")
-    Rel(operator, platform, "GET /health, /contract", "HTTPS")
-    Rel(bpmn, platform, "Отправка задач", "HTTPS")
-    Rel(platform, opa, "Проверка политики", "HTTP")
-    Rel(platform, obs, "Трейсы + метрики", "OTLP + HTTP")
-
-```
-
-### Уровень 2 — Container
-
-Что развёрнуто и как компоненты общаются.
-
-```mermaid
-C4Container
-    title Container Diagram - Agentic Orchestration Platform
-
-    Person(client, "Клиент", "Отправляет задачи")
-
-    System_Boundary(platform, "Docker Compose") {
-        Container(orchestrator, "Orchestrator Agent", "FastAPI / Python", "Координирует worker-агентов")
-        Container(sourcing, "Sourcing Agent", "FastAPI / Python", "Собирает и агрегирует потребности")
-        Container(pricing, "Pricing Agent", "FastAPI / Python", "Рассчитывает НМЦ, проверяет цены")
-    }
-
-    System_Boundary(contracts, "A2A-контракты") {
-        ContainerDb(yamls, "contracts/", "YAML-файлы", "Контракты агентов (в стиле OpenAPI)")
-    }
-
-    Rel(client, orchestrator, "POST /a2a/task", "HTTP")
-    Rel(orchestrator, sourcing, "POST /a2a/task + X-Agent-SVID", "HTTP")
-    Rel(orchestrator, pricing, "POST /a2a/task + X-Agent-SVID", "HTTP")
-    Rel(orchestrator, yamls, "Загрузка контракта", "Filesystem")
-    Rel(sourcing, yamls, "Загрузка контракта", "Filesystem")
-    Rel(pricing, yamls, "Загрузка контракта", "Filesystem")
-
-```
-
-### Уровень 3 — Component
-
-Какие компоненты находятся внутри каждого контейнера.
-
-```mermaid
-C4Component
-    title Component Diagram - Orchestrator Agent
-
-    Container_Boundary(orchestrator, "orchestrator") {
-        Component(routes, "REST-маршруты", "FastAPI", "/health, /contract, /a2a/task")
-        Component(worker_client, "Клиент worker'ов", "httpx", "Вызывает worker-агентов через A2A")
-        Component(aggregator, "Агрегатор результатов", "Python", "Считает avg confidence, decision")
-        Component(contract_loader, "Загрузчик контрактов", "PyYAML", "Читает contracts/*.yaml")
-    }
-
-    Container_Boundary(workers, "Worker-агенты") {
-        Component(sourcing_api, "Sourcing API", "FastAPI", "collect_requirements, lot_formation")
-        Component(pricing_api, "Pricing API", "FastAPI", "calculate_nmc, verify_price_documentation")
-    }
-
-    Rel(routes, worker_client, "Последовательные вызовы", "asyncio")
-    Rel(worker_client, sourcing_api, "A2A: POST /a2a/task", "HTTP")
-    Rel(worker_client, pricing_api, "A2A: POST /a2a/task", "HTTP")
-    Rel(routes, aggregator, "Агрегация результатов", "Python")
-    Rel(routes, contract_loader, "Загрузка контрактов", "PyYAML")
-
-```
-
----
-
-## A2A-протокол
-
-### Пример контракта
-
-Каждый агент публикует YAML-контракт:
-
-```yaml
-agent_id: "sourcing_agent_v1"
-name: "Sourcing Agent"
-version: "1.0"
-capabilities:
-  - collect_requirements
-  - aggregate_needs
-  - verify_nomenclature
-
-input_schema:
-  type: object
-  properties:
-    lot_id: { type: string }
-    category: { type: string }
-
-output_schema:
-  type: object
-  properties:
-    lot_data: { type: object }
-    nomenclature_ok: { type: boolean }
-    confidence: { type: number }
-
-security:
-  required_svid: "spiffe://company.ru/agents/sourcing_v1"
-  audit_level: "full"
-
-```
-
-### A2A-вызов
-
-Orchestrator вызывает worker через HTTP с SVID в заголовке:
-
-```http
-POST /a2a/task
-X-Agent-SVID: spiffe://company.ru/agents/orchestrator_v1
-Content-Type: application/json
-
-{
-  "task": { "lot_id": "LOT-001", "category": "IT" },
-  "caller_svid": "spiffe://company.ru/agents/orchestrator_v1"
-}
-
-```
-
-### Многошаговая координация
-
-Orchestrator выполняет **многошаговые задачи**:
+End-to-end PoC автоматизации закупок по 223-ФЗ. Полный конвейер от заявки до проекта договора — **8 микросервисов**, работающих на моках и реальной логике:
 
 ```text
-task_type=procurement
-    ├─ Шаг 1: Sourcing Agent
-    │    └─ Если nomenclature_ok = true
-    │
-    └─ Шаг 2: Pricing Agent
-         └─ Расчёт НМЦ
-    ↓
-Агрегация: avg confidence = (0.92 + 0.88) / 2 = 0.90
-Решение: approve (>= 0.85)
-
+Orchestrator (9000)
+    ├─→ Sourcing (9001)   ──→ Mock-1С (9101)           [ЕСУ НСИ, номенклатура]
+    ├─→ Pricing (9002)    ──→ Mock-Market (9102)       [рыночные цены, НМЦ]
+    ├─→ Compliance (9003) ──→ RAG (10 ЛНА)             [223-ФЗ + локальные акты]
+    ├─→ OPA (9210)        ──→ procurement.rego         [allow | escalate | deny]
+    └─→ Document (9004)   ──→ Jinja2 (ПЗД + договор)   [финальные документы]
 ```
+
+**Verified scenario:** закупка серверного оборудования на 1,5 млн руб. → `allow` за секунды (вместо 8 дней вручную).
 
 ---
 
-## Workflow Diagrams
+## Архитектура
 
-### A2A Sequence — Multi-Step Task
+### Слои
 
-Полный путь задачи `procurement` через Orchestrator и worker-агентов.
+| Слой | Компонент | Технология |
+| --- | --- | --- |
+| **Orchestration** | Orchestrator Agent | FastAPI + httpx |
+| **Workers** | Sourcing, Pricing, Compliance, Document | FastAPI + `base.py` |
+| **Policy** | OPA | Rego v1 |
+| **Integration** | MCP Gateway | SSE + JSON-RPC 2.0 |
+| **Identity** | WIMSE SVID | `spiffe://company.ru/agents/*` |
+| **RAG** | VectorStore abstraction | InMemory (default) \| Qdrant |
+| **LLM** | LLM abstraction | stub (default) \| ollama |
+| **Templates** | Jinja2 | pzd.j2 + contract.j2 |
 
-```mermaid
-sequenceDiagram
-    autonumber
+### C4 Level 1 — System Context
 
-    participant Client
-    participant Orchestrator
-    participant Sourcing as Sourcing Agent
-    participant Pricing as Pricing Agent
-
-    Client->>Orchestrator: POST /a2a/task - procurement task
-    Note over Orchestrator: Parse task and determine workers
-
-    Orchestrator->>Sourcing: POST /a2a/task + SVID header
-    Note over Sourcing: Verify caller SVID
-    Sourcing-->>Orchestrator: lot_data and nomenclature_ok true
-
-    alt nomenclature_ok is true
-        Orchestrator->>Pricing: POST /a2a/task + SVID header
-        Note over Pricing: Calculate NMC
-        Pricing-->>Orchestrator: nmc_value and confidence
-    else nomenclature_ok is false
-        Orchestrator->>Orchestrator: Skip pricing
-    end
-
-    Note over Orchestrator: Aggregate confidence 0.92 and 0.88 equals 0.90
-    Note over Orchestrator: Decision approve
-
-    Orchestrator-->>Client: decision approve
-
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  System Context — Agentic Orchestration Platform               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────┐                          ┌──────────┐            │
+│   │  Client  │──POST /a2a/task─────────▶│ Platform │            │
+│   └──────────┘                          │  (8 svc) │            │
+│                                         └────┬─────┘            │
+│   ┌──────────┐                               │                  │
+│   │ Operator │──GET /health, /contract──────▶│                  │
+│   └──────────┘                               │                  │
+│                                              ▼                  │
+│                                         ┌──────────┐            │
+│                                         │   OPA    │            │
+│                                         │ (policy) │            │
+│                                         └──────────┘            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Decision Flow — Orchestrator Logic
+### C4 Level 2 — Containers
 
-Логика принятия решения в Orchestrator.
-
-```mermaid
-flowchart TD
-    A[Receive task] --> B{task type}
-    
-    B -->|procurement| C[Call Sourcing Agent]
-    B -->|sourcing| D[Call Sourcing Agent]
-    B -->|pricing| E[Call Pricing Agent]
-    B -->|unknown| F[Return 400]
-    
-    C --> G{nomenclature ok}
-    G -->|true| H[Call Pricing Agent]
-    G -->|false| I[Skip pricing]
-    
-    H --> J[Collect results]
-    I --> J
-    
-    J --> K[Compute avg confidence]
-    K --> L{confidence above 0.85}
-    L -->|yes| M[decision approve]
-    L -->|no| N[decision escalate]
-    
-    M --> O[Return response]
-    N --> O
-    
-    style M fill:#d4edda
-    style N fill:#fff3cd
-    style F fill:#f8d7da
-
-```
-
-### Agent Lifecycle — State Diagram
-
-Жизненный цикл worker-агента.
-
-```mermaid
-stateDiagram-v2
-    [*] --> Starting
-    Starting --> Registering
-    Registering --> Ready
-    Ready --> Working
-    Working --> Ready
-    Working --> Escalating
-    Escalating --> Ready
-    Ready --> Shutdown
-    Shutdown --> [*]
-
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Docker Compose — aop-network                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Client ──▶ Orchestrator Agent  (FastAPI / Python :9000)       │
+│                    │                                            │
+│                    ├──▶ Sourcing Agent   (FastAPI :9001)        │
+│                    │         └──▶ Mock-1С  (FastAPI :9101)      │
+│                    │                                            │
+│                    ├──▶ Pricing Agent    (FastAPI :9002)        │
+│                    │         └──▶ Mock-Market (FastAPI :9102)   │
+│                    │                                            │
+│                    ├──▶ Compliance Agent (FastAPI :9003)        │
+│                    │         └──▶ RAG (10 ЛНА)                  │
+│                    │                                            │
+│                    ├──▶ Document Agent   (FastAPI :9004)        │
+│                    │         └──▶ Jinja2 (ПЗД + договор)        │
+│                    │                                            │
+│                    └──▶ OPA              (Rego v1 :9210)        │
+│                              └──▶ procurement.rego              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -282,109 +111,248 @@ stateDiagram-v2
 
 ### Требования
 
-* Docker Desktop ≥ 4.89
-* PowerShell (Windows) или Bash (Linux/macOS)
+- Docker Desktop >= 4.89 (Compose v5+)
+- PowerShell (Windows) или Bash (Linux/macOS)
 
-### 1. Запустить платформу
+### 1. Запустить все сервисы
 
 ```powershell
 docker compose up --build -d
 docker compose ps
-
 ```
 
-Ожидаемый вывод:
+Ожидаемо — **8 контейнеров** в статусе `Up`:
 
 ```text
-NAME            STATUS        PORTS
-aop-orchestrator   Up        0.0.0.0:9000->9000/tcp
-aop-pricing        Up        0.0.0.0:9002->9002/tcp
-aop-sourcing       Up        0.0.0.0:9001->9001/tcp
-
+aop-orchestrator   :9000
+aop-sourcing       :9001
+aop-pricing        :9002
+aop-compliance     :9003
+aop-document       :9004
+aop-opa            :9210
+aop-mock-1c        :9101
+aop-mock-market    :9102
 ```
 
-### 2. Проверить health
+### 2. Health-check
 
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:9000/health"
-Invoke-RestMethod -Uri "http://localhost:9001/health"
-Invoke-RestMethod -Uri "http://localhost:9002/health"
-
+9000..9004 | ForEach-Object { Invoke-RestMethod "http://localhost:$_/health" }
+Invoke-RestMethod "http://localhost:9101/health"
+Invoke-RestMethod "http://localhost:9102/health"
 ```
 
-### 3. Получить контракт агента
+### 3. Полный сценарий — закупка серверного оборудования
 
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:9000/contract" | ConvertTo-Json -Depth 10
+$body = @{
+    task_type = "procurement"
+    payload   = @{
+        lot_id   = "LOT-001"
+        amount   = 1500000
+        region   = "Moscow"
+        category = "server hardware"
+    }
+    context   = @{}
+} | ConvertTo-Json -Depth 10
 
+$response = Invoke-RestMethod -Uri "http://localhost:9000/a2a/task" `
+    -Method Post -ContentType "application/json" -Body $body
+
+$response.decision
+$response.reasoning
+$response.document.documents | Format-Table -AutoSize
 ```
 
-### 4. Запустить мультиагентную задачу
+Ожидаемый результат:
 
-```powershell
-$json = '{"task_type":"procurement","payload":{"lot_id":"LOT-001","category":"IT","amount":1500000},"context":{}}'
+```text
+decision:   allow
+reasoning:  sourcing: OK; pricing: OK; compliance: OK; document: OK; opa: allow
 
-Invoke-RestMethod -Uri "http://localhost:9000/a2a/task" `
-    -Method Post `
-    -ContentType "application/json" `
-    -Body $json | ConvertTo-Json -Depth 10
-
+documents:
+type              format     size
+----              ------     ----
+pzd               markdown   2026
+contract_draft    markdown   3045
 ```
 
 ---
 
-## Тестирование
+## Сервисы
 
-### Ожидаемый ответ
+| Сервис | Порт | Назначение | Технология |
+| --- | --- | --- | --- |
+| `orchestrator` | 9000 | Координация, агрегация confidence, policy enforcement | FastAPI |
+| `sourcing` | 9001 | Номенклатура, ЕСУ НСИ | MCP → mock-1c |
+| `pricing` | 9002 | НМЦ, рыночные цены | MCP → mock-market |
+| `compliance` | 9003 | 223-ФЗ + ЛНА через RAG | VectorStore + LLM |
+| `document` | 9004 | ПЗД + проект договора | Jinja2 |
+| `opa` | 9210 | Policy enforcement | Rego v1 |
+| `mock-1c` | 9101 | Эмуляция 1С (ЕСУ НСИ) | SSE + JSON-RPC 2.0 |
+| `mock-market` | 9102 | Эмуляция рыночных цен | SSE + JSON-RPC 2.0 |
 
-```json
-{
-  "decision": "approve",
-  "confidence": 0.9,
-  "reasoning": "sourcing: OK; pricing: OK",
-  "worker_results": [
-    {
-      "worker": "sourcing",
-      "svid": "spiffe://company.ru/agents/sourcing_v1",
-      "response": {
-        "lot_data": {"lot_id": "LOT-001", "category": "IT", "items_count": 5},
-        "nomenclature_ok": true,
-        "confidence": 0.92
-      },
-      "success": true
-    },
-    {
-      "worker": "pricing",
-      "svid": "spiffe://company.ru/agents/pricing_v1",
-      "response": {
-        "nmc_value": 1425000.0,
-        "justification": "Calculated using method_1",
-        "confidence": 0.88
-      },
-      "success": true
-    }
-  ]
-}
+---
 
+## Компоненты
+
+### Orchestrator Agent
+
+- Принимает `{"task_type": "procurement", "payload": {...}}`
+- Вызывает Sourcing → Pricing (если `nomenclature_ok`) → Compliance
+- Агрегирует `avg_confidence`
+- Вызывает OPA с полным контекстом
+- Если `decision == "allow"` → вызывает Document Agent
+- Возвращает: `decision`, `confidence`, `reasoning`, `opa`, `document`, `worker_results`
+
+### Sourcing Agent
+
+- Дёргает Mock-1С через MCP: `get_lot_data`
+- Fallback на stub при недоступности MCP
+- Возвращает: `lot_data.items[]`, `nomenclature_ok`, `confidence`, `source`
+
+### Pricing Agent
+
+- Дёргает Mock-Market через MCP: `get_market_prices`
+- Fallback на stub
+- Возвращает: `nmc_value`, `market{avg,min,max}`, `confidence`, `source`
+
+### Compliance Agent
+
+- RAG-поиск по 10 атомарным ЛНА (keyword-based в `InMemoryVectorStore`)
+- LLM-режимы: `stub` (default, для CI/CD) \| `ollama` (для демо)
+- Возвращает: `compliance_ok`, `reasoning`, `confidence`, `matched_rules`, `violations`
+
+### Document Agent
+
+- Jinja2-шаблоны: `pzd.j2`, `contract.j2`
+- Вызывается только при `opa.decision == "allow"`
+- Возвращает: `pzd_text`, `contract_draft_text`, `confidence`, `generated_at`, `documents[]`
+
+### OPA Policy
+
+- `policies/procurement.rego` — решение `allow | escalate | deny`
+- Лимиты: `max_amount = 50M`, `min_confidence = 0.85`
+- Allow-list регионов: Moscow, Saint-Petersburg, Novosibirsk
+- Проверки: `amount`, `confidence`, `nomenclature_ok`, `compliance_ok`, `region`
+
+---
+
+## Безопасность
+
+### WIMSE SVID
+
+Каждый агент имеет уникальный SPIFFE-ID:
+
+```text
+spiffe://company.ru/agents/orchestrator_v1
+spiffe://company.ru/agents/sourcing_v1
+spiffe://company.ru/agents/pricing_v1
+spiffe://company.ru/agents/compliance_v1
+spiffe://company.ru/agents/document_v1
 ```
 
-### Проверить логи
+Передаётся в заголовке `X-Agent-SVID` на каждом A2A/MCP-вызове. Mock-серверы проверяют SVID по allow-list.
 
-```powershell
-docker logs aop-orchestrator --tail 30
-docker logs aop-sourcing --tail 20
-docker logs aop-pricing --tail 20
+### Policy Enforcement
 
+OPA проверяет **каждое** решение перед финализацией. Никакие агенты не могут обойти политику — Orchestrator всегда вызывает OPA.
+
+---
+
+## Конфигурация
+
+### LLM (Compliance Agent)
+
+```yaml
+environment:
+  LLM_MODE: "stub"     # stub | ollama
+  OLLAMA_URL: "http://ollama:11434"
 ```
+
+### VectorStore (Compliance Agent)
+
+```yaml
+environment:
+  VECTOR_STORE: "memory"   # memory | qdrant
+```
+
+### MCP timeout (Sourcing, Pricing)
+
+```yaml
+environment:
+  MCP_TIMEOUT: "5.0"
+```
+
+### Fallback
+
+Все агенты имеют fallback на stub при недоступности MCP — PoC не падает.
+
+---
+
+## Verified Scenarios
+
+| Scenario | Input | Ожидаемый output |
+| --- | --- | --- |
+| **Allow** | amount=1.5M, category=server hardware | `decision: allow`, документы сформированы |
+| **Deny (amount)** | amount=75M | `decision: deny`, `deny_reasons: ["amount 75000000 exceeds max_amount 50000000"]` |
+| **Deny (compliance)** | compliance_ok=false | `decision: deny`, `deny_reasons: ["compliance_ok is false"]` |
+| **Escalate** | confidence < 0.85 | `decision: escalate`, документы не формируются |
 
 ---
 
 ## Дорожная карта
 
-* [x] Реализация A2A-вызовов и передачи SVID
-* [x] Иерархическая координация (Orchestrator -> Sourcing -> Pricing)
-* [ ] Подключение OPA (Policy Engine)
-* [ ] Реализация Immutable Audit Trail
+- [x] Multi-agent A2A (Orchestrator + 4 worker'а)
+- [x] WIMSE SVID на всех вызовах
+- [x] MCP Gateway → Mock-1С, Mock-Market
+- [x] Compliance Agent + RAG (10 ЛНА)
+- [x] OPA/Rego policy enforcement
+- [x] Document Agent (Jinja2: ПЗД + договор)
+- [ ] Camunda User Task + Form (Human-in-the-Loop для escalate)
+- [ ] Hash-chain audit trail
+- [ ] Qdrant + Ollama для production-grade RAG
+- [ ] Реальные интеграции с 1С, ЕИС, SAP (через MCP Gateway)
+
+---
+
+## Структура репозитория
+
+```text
+agentic-orchestration-platform/
+├── agents/
+│   ├── orchestrator/      # A2A координация + OPA + Document
+│   ├── workers/
+│   │   ├── base.py        # Общий FastAPI-каркас для worker'ов
+│   │   ├── sourcing.py    # Sourcing Agent
+│   │   ├── pricing.py     # Pricing Agent
+│   │   ├── Dockerfile.sourcing
+│   │   └── Dockerfile.pricing
+│   ├── compliance/        # Compliance Agent + RAG + 10 ЛНА
+│   │   ├── main.py
+│   │   ├── rag.py         # VectorStore abstraction
+│   │   ├── llm.py         # LLM abstraction
+│   │   └── policies/      # 10 атомарных .md ЛНА
+│   └── document/          # Document Agent + Jinja2
+│       ├── main.py
+│       └── templates/
+│           ├── pzd.j2
+│           └── contract.j2
+├── mcp/
+│   ├── mock_1c_mcp_server.py
+│   ├── mock_market_mcp_server.py
+│   └── fixtures/
+│       ├── nomenclature.json
+│       └── market_prices.json
+├── policies/
+│   ├── procurement.rego   # OPA policy
+│   └── data.json          # Limits, regions
+├── contracts/
+│   ├── compliance_agent_v1.yaml
+│   └── document_agent.yaml
+├── docker-compose.yml     # 8 сервисов
+└── README.md
+```
 
 ---
 
@@ -395,13 +363,14 @@ docker logs aop-pricing --tail 20
 | **3.1 Иерархическая оркестрация** | Orchestrator + Worker-агенты |
 | **3.2.1 Контракты агентов** | YAML-контракты в `contracts/` |
 | **3.2.2 Шина сообщений** | A2A на HTTP (в production: RabbitMQ) |
+| **4.1 Agent Policies** | OPA/Rego (`policies/procurement.rego`) |
 | **4.2 WIMSE-идентичность** | Заголовок `X-Agent-SVID` на каждом вызове |
-| **4.3 Immutable Audit** | Запланировано (append-only log) |
+| **4.3 Immutable Audit** | Запланировано (hash-chain roadmap) |
 
 ---
 
 ## Ссылки
 
-* **Blueprint:** [github.com/realrvs/enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint?utm_source=gemini)
-* **Reference PoC (BPMN + LLM + Policy):** [github.com/realrvs/agentic-orchestration-poc](https://github.com/realrvs/agentic-orchestration-poc?utm_source=gemini)
-* **MCP Gateway PoC:** [github.com/realrvs/mcp-gateway-poc](https://github.com/realrvs/mcp-gateway-poc?utm_source=gemini)
+- **Blueprint:** [github.com/realrvs/enterprise-agent-orchestration-blueprint](https://github.com/realrvs/enterprise-agent-orchestration-blueprint)
+- **Reference PoC (BPMN + LLM + Policy):** [github.com/realrvs/agentic-orchestration-poc](https://github.com/realrvs/agentic-orchestration-poc)
+- **MCP Gateway PoC:** [github.com/realrvs/mcp-gateway-poc](https://github.com/realrvs/mcp-gateway-poc)
